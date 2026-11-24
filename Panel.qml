@@ -39,6 +39,12 @@ Panel {
   property var monitors: []
   property int selectedIndex: 0
   readonly property var selectedMonitor: monitors.length > selectedIndex && selectedIndex >= 0 ? monitors[selectedIndex] : null
+
+  property int liveBrightness: selectedMonitor ? selectedMonitor.brightness : 100
+  onSelectedMonitorChanged: {
+    if (selectedMonitor) liveBrightness = selectedMonitor.brightness
+  }
+
   property string statusMessage: ""
   property real canvasScale: 0.052
 
@@ -66,16 +72,78 @@ Panel {
     for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].y + monitors[i].height)
     return m
   }
-  readonly property real canvasOffsetX: Math.max(Style.space(20), (canvas.width - (groupBoundsMaxX - groupBoundsMinX) * canvasScale) / 2)
-  readonly property real canvasOffsetY: Math.max(Style.space(18), (canvas.height - (groupBoundsMaxY - groupBoundsMinY) * canvasScale) / 2)
+  property real canvasWidth: Style.space(450)
+  property real canvasHeight: Style.space(155)
+  readonly property real canvasOffsetX: Math.max(Style.space(20), (canvasWidth - (groupBoundsMaxX - groupBoundsMinX) * canvasScale) / 2)
+  readonly property real canvasOffsetY: Math.max(Style.space(18), (canvasHeight - (groupBoundsMaxY - groupBoundsMinY) * canvasScale) / 2)
+
+  readonly property var resolutionOptions: {
+    if (!selectedMonitor || !selectedMonitor.availableModes) return []
+    var list = []
+    var seen = {}
+    for (var i = 0; i < selectedMonitor.availableModes.length; i++) {
+      var parts = selectedMonitor.availableModes[i].split("@")
+      var res = parts[0]
+      if (!seen[res]) {
+        seen[res] = true
+        var wh = res.split("x")
+        list.push({
+          value: res,
+          label: wh[0] + " × " + wh[1]
+        })
+      }
+    }
+    return list
+  }
+
+  readonly property string currentResolutionValue: {
+    if (!selectedMonitor) return ""
+    return selectedMonitor.width + "x" + selectedMonitor.height
+  }
+
+  function getAvailableRatesForResolution(m, resStr) {
+    if (!m || !m.availableModes) return []
+    var list = []
+    var seen = {}
+    var prefix = resStr + "@"
+    for (var i = 0; i < m.availableModes.length; i++) {
+      var mode = m.availableModes[i]
+      if (mode.indexOf(prefix) === 0) {
+        var hzStr = mode.substring(prefix.length)
+        var hzNum = parseFloat(hzStr)
+        if (!seen[hzStr]) {
+          seen[hzStr] = true
+          var cleanLabel = (hzNum % 1 === 0 ? hzNum.toFixed(0) : hzNum.toFixed(2)) + " Hz"
+          list.push({
+            value: hzStr,
+            label: cleanLabel
+          })
+        }
+      }
+    }
+    return list
+  }
+
+  readonly property var rateOptions: {
+    if (!selectedMonitor) return []
+    return getAvailableRatesForResolution(selectedMonitor, currentResolutionValue)
+  }
+
+  readonly property string currentRateValue: {
+    if (!selectedMonitor) return ""
+    var curr = selectedMonitor.refreshRate
+    for (var i = 0; i < rateOptions.length; i++) {
+      var optHz = parseFloat(rateOptions[i].value)
+      if (Math.abs(optHz - curr) < 0.05) return rateOptions[i].value
+    }
+    return String(curr)
+  }
 
   function parseStatus(raw) {
     try {
       var data = JSON.parse(raw)
-      if (Array.isArray(data)) {
-        monitors = data
-        if (selectedIndex >= monitors.length) selectedIndex = 0
-      }
+      monitors = data
+      if (selectedIndex >= data.length) selectedIndex = 0
     } catch (e) {
       // ignore parse error
     }
@@ -85,15 +153,49 @@ Panel {
     if (!statusProc.running) statusProc.running = true
   }
 
-  function setBrightness(name, pct) {
+  property string pendingBrightnessMonitor: ""
+  property int pendingBrightnessVal: -1
+
+  Timer {
+    id: brightnessDebounceTimer
+    interval: 80
+    repeat: false
+    onTriggered: root.flushBrightness()
+  }
+
+  function queueBrightness(name, val) {
+    pendingBrightnessMonitor = name
+    pendingBrightnessVal = val
+    if (!brightnessDebounceTimer.running && !brightnessProc.running) {
+      flushBrightness()
+    } else if (!brightnessDebounceTimer.running) {
+      brightnessDebounceTimer.start()
+    }
+  }
+
+  function flushBrightness() {
+    if (pendingBrightnessVal < 0 || pendingBrightnessMonitor === "") return
     if (brightnessProc.running) return
+
+    var name = pendingBrightnessMonitor
+    var val = pendingBrightnessVal
+    pendingBrightnessVal = -1
+
     brightnessProc.command = [
       String(Qt.resolvedUrl("backend.py")).replace(/^file:\/\//, ""),
       "set-brightness",
       name,
-      String(Math.round(pct))
+      String(val)
     ]
     brightnessProc.running = true
+  }
+
+  function forceBrightness(name, val) {
+    pendingBrightnessMonitor = name
+    pendingBrightnessVal = val
+    if (!brightnessProc.running) {
+      flushBrightness()
+    }
   }
 
   function applyLayout() {
@@ -120,50 +222,57 @@ Panel {
     clearStatusTimer.restart()
   }
 
-  function onCardDropped(draggedIdx) {
+  function onCardDropped(draggedIdx, dropX, dropY) {
     if (monitors.length < 2) return
 
-    var draggedItem = monitorRepeater.itemAt(draggedIdx)
     var otherIdx = (draggedIdx === 0) ? 1 : 0
     var otherItem = monitorRepeater.itemAt(otherIdx)
-    if (!draggedItem || !otherItem) return
+    var draggedItem = monitorRepeater.itemAt(draggedIdx)
+    if (!otherItem || !draggedItem) return
 
-    var draggedCenterX = draggedItem.x + draggedItem.width / 2
-    var draggedCenterY = draggedItem.y + draggedItem.height / 2
-    var otherCenterX = otherItem.x + otherItem.width / 2
-    var otherCenterY = otherItem.y + otherItem.height / 2
+    var dW = draggedItem.width
+    var dH = draggedItem.height
+    var oW = otherItem.width
+    var oH = otherItem.height
 
-    var dx = draggedCenterX - otherCenterX
-    var dy = draggedCenterY - otherCenterY
+    var dropCenterX = dropX + dW / 2.0
+    var dropCenterY = dropY + dH / 2.0
+    var otherCenterX = otherItem.x + oW / 2.0
+    var otherCenterY = otherItem.y + oH / 2.0
+
+    var dx = dropCenterX - otherCenterX
+    var dy = dropCenterY - otherCenterY
+
+    var normX = dx / ((dW + oW) / 2.0)
+    var normY = dy / ((dH + oH) / 2.0)
 
     var copy = JSON.parse(JSON.stringify(monitors))
     var dMon = copy[draggedIdx]
     var oMon = copy[otherIdx]
 
-    // Determine primary drag direction (horizontal vs vertical)
-    if (Math.abs(dx) > Math.abs(dy)) {
-      if (dx > 0) {
-        // Dragged monitor placed to the RIGHT of other monitor
+    if (Math.abs(normX) >= Math.abs(normY)) {
+      if (normX > 0) {
+        // Dragged placed to the RIGHT of other monitor
         oMon.x = 0
         oMon.y = 0
         dMon.x = Math.round(oMon.width / oMon.scale)
         dMon.y = 0
       } else {
-        // Dragged monitor placed to the LEFT of other monitor
+        // Dragged placed to the LEFT of other monitor
         dMon.x = 0
         dMon.y = 0
         oMon.x = Math.round(dMon.width / dMon.scale)
         oMon.y = 0
       }
     } else {
-      if (dy > 0) {
-        // Dragged monitor placed BELOW other monitor
+      if (normY > 0) {
+        // Dragged placed BELOW other monitor
         oMon.x = 0
         oMon.y = 0
         dMon.x = 0
         dMon.y = Math.round(oMon.height / oMon.scale)
       } else {
-        // Dragged monitor placed ABOVE other monitor
+        // Dragged placed ABOVE other monitor
         dMon.x = 0
         dMon.y = 0
         oMon.x = 0
@@ -172,7 +281,39 @@ Panel {
     }
 
     monitors = copy
-    statusMessage = "Position snapped! Click Apply or Save"
+    root.saveLayout()
+  }
+
+  function onResolutionSelected(resVal) {
+    if (!resVal || resVal === "" || !selectedMonitor) return
+    var wh = resVal.split("x")
+    if (wh.length !== 2) return
+    var w = parseInt(wh[0])
+    var h = parseInt(wh[1])
+    if (w === selectedMonitor.width && h === selectedMonitor.height) return
+
+    var copy = JSON.parse(JSON.stringify(monitors))
+    copy[selectedIndex].width = w
+    copy[selectedIndex].height = h
+
+    var availRates = getAvailableRatesForResolution(copy[selectedIndex], resVal)
+    if (availRates.length > 0) {
+      copy[selectedIndex].refreshRate = parseFloat(availRates[0].value)
+    }
+
+    monitors = copy
+    root.saveLayout()
+  }
+
+  function onRateSelected(rateVal) {
+    if (!rateVal || rateVal === "" || !selectedMonitor) return
+    var hz = parseFloat(rateVal)
+    if (isNaN(hz) || hz === selectedMonitor.refreshRate) return
+
+    var copy = JSON.parse(JSON.stringify(monitors))
+    copy[selectedIndex].refreshRate = hz
+    monitors = copy
+    root.saveLayout()
   }
 
   function setScale(scaleVal) {
@@ -180,6 +321,7 @@ Panel {
     var copy = JSON.parse(JSON.stringify(monitors))
     copy[selectedIndex].scale = scaleVal
     monitors = copy
+    root.saveLayout()
   }
 
   function setTransform(transVal) {
@@ -187,29 +329,7 @@ Panel {
     var copy = JSON.parse(JSON.stringify(monitors))
     copy[selectedIndex].transform = transVal
     monitors = copy
-  }
-
-  function cycleMode(delta) {
-    if (!selectedMonitor || !selectedMonitor.availableModes || selectedMonitor.availableModes.length === 0) return
-    var modes = selectedMonitor.availableModes
-    var idx = 0
-    for (var i = 0; i < modes.length; i++) {
-      if (modes[i].indexOf(selectedMonitor.width + "x" + selectedMonitor.height) === 0) {
-        idx = i
-        break
-      }
-    }
-    var nextIdx = (idx + delta + modes.length) % modes.length
-    var modeStr = modes[nextIdx] // format: 2560x1440@59.95
-    var parts = modeStr.split("@")
-    if (parts.length === 2) {
-      var wh = parts[0].split("x")
-      var copy = JSON.parse(JSON.stringify(monitors))
-      copy[selectedIndex].width = parseInt(wh[0])
-      copy[selectedIndex].height = parseInt(wh[1])
-      copy[selectedIndex].refreshRate = parseFloat(parts[1])
-      monitors = copy
-    }
+    root.saveLayout()
   }
 
   onOpenedChanged: {
@@ -234,7 +354,18 @@ Panel {
     }
   }
 
-  Process { id: brightnessProc }
+  Process {
+    id: brightnessProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (root.pendingBrightnessVal >= 0) {
+          root.flushBrightness()
+        }
+      }
+    }
+  }
+
   Process { id: applyProc }
   Process { id: saveProc }
 
@@ -256,13 +387,14 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: panel.loadedContent
-    contentWidth: panel.fittedContentWidth(Style.space(465))
+    contentWidth: panel.fittedContentWidth(Style.space(475))
     contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
 
     content: PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
       implicitHeight: contentColumn.implicitHeight
+      blocked: (typeof resDropdown !== "undefined" && resDropdown.popupOpen) || (typeof rateDropdown !== "undefined" && rateDropdown.popupOpen)
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -324,15 +456,14 @@ Panel {
           border.width: 1
           clip: true
 
-          // Helper hint at the bottom
           Text {
             textFormat: Text.PlainText
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottomMargin: Style.space(6)
-            text: "✦ Drag screens to position · Release to snap"
+            text: "✦ Drag screens to position · Release to snap & save"
             color: root.foreground
-            opacity: 0.4
+            opacity: 0.45
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
@@ -353,21 +484,24 @@ Panel {
               readonly property real targetX: root.canvasOffsetX + (modelData.x - root.groupBoundsMinX) * root.canvasScale
               readonly property real targetY: root.canvasOffsetY + (modelData.y - root.groupBoundsMinY) * root.canvasScale
 
-              x: dragArea.drag.active ? x : targetX
-              y: dragArea.drag.active ? y : targetY
+              Binding {
+                target: monitorCard
+                property: "x"
+                value: monitorCard.targetX
+                when: !dragArea.drag.active
+              }
+              Binding {
+                target: monitorCard
+                property: "y"
+                value: monitorCard.targetY
+                when: !dragArea.drag.active
+              }
+
               width: w
               height: h
               z: dragArea.drag.active ? 100 : (isSelected ? 10 : 1)
               scale: dragArea.drag.active ? 1.05 : 1.0
 
-              Behavior on x {
-                enabled: !dragArea.drag.active
-                NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutCubic }
-              }
-              Behavior on y {
-                enabled: !dragArea.drag.active
-                NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutCubic }
-              }
               Behavior on scale {
                 NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
               }
@@ -437,16 +571,27 @@ Panel {
                 cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                 drag.target: monitorCard
                 drag.axis: Drag.XAndYAxis
-                drag.minimumX: Style.space(5)
-                drag.maximumX: canvas.width - monitorCard.width - Style.space(5)
-                drag.minimumY: Style.space(5)
-                drag.maximumY: canvas.height - monitorCard.height - Style.space(5)
+                drag.minimumX: Style.space(4)
+                drag.maximumX: root.canvasWidth - monitorCard.width - Style.space(4)
+                drag.minimumY: Style.space(4)
+                drag.maximumY: root.canvasHeight - monitorCard.height - Style.space(4)
+
+                property real dropX: 0
+                property real dropY: 0
 
                 onPressed: {
                   root.selectedIndex = index
+                  dropX = monitorCard.x
+                  dropY = monitorCard.y
+                }
+                onPositionChanged: {
+                  if (drag.active) {
+                    dropX = monitorCard.x
+                    dropY = monitorCard.y
+                  }
                 }
                 onReleased: {
-                  root.onCardDropped(index)
+                  root.onCardDropped(index, dropX, dropY)
                 }
               }
             }
@@ -503,7 +648,7 @@ Panel {
             }
           }
 
-          // Hardware Brightness Slider
+          // Hardware Brightness Slider (Thin Track & Live Feedback)
           Column {
             width: parent.width
             spacing: Style.space(4)
@@ -517,6 +662,7 @@ Panel {
                 opacity: 0.7
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
+                anchors.verticalCenter: parent.verticalCenter
               }
               Item {
                 width: Math.max(0, parent.width - parent.children[0].implicitWidth - parent.children[2].implicitWidth)
@@ -524,101 +670,147 @@ Panel {
               }
               Text {
                 textFormat: Text.PlainText
-                text: (root.selectedMonitor ? root.selectedMonitor.brightness : 100) + "%"
-                color: root.foreground
+                text: root.liveBrightness + "%"
+                color: root.accentColor
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 font.bold: true
+                anchors.verticalCenter: parent.verticalCenter
               }
             }
 
-            Rectangle {
-              id: bSliderTrack
+            Item {
+              id: sliderContainer
               width: parent.width
-              height: Style.space(18)
-              radius: height / 2
-              color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+              height: Style.space(20)
 
               Rectangle {
+                id: bTrack
                 anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                height: parent.height
-                radius: parent.radius
-                color: root.accentColor
-                width: Math.max(parent.height, parent.width * ((root.selectedMonitor ? root.selectedMonitor.brightness : 100) / 100.0))
+                height: Style.space(5)
+                radius: height / 2
+                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
 
-                Behavior on width { NumberAnimation { duration: Style.duration(80) } }
+                Rectangle {
+                  id: bFill
+                  anchors.left: parent.left
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  radius: parent.radius
+                  color: root.accentColor
+                  width: Math.max(parent.radius, bTrack.width * (Math.max(1, Math.min(100, root.liveBrightness)) / 100.0))
+                }
+              }
+
+              Rectangle {
+                id: bThumb
+                width: Style.space(14)
+                height: Style.space(14)
+                radius: width / 2
+                color: root.accentColor
+                border.color: root.foreground
+                border.width: 1
+                anchors.verticalCenter: parent.verticalCenter
+                x: Math.max(0, Math.min(sliderContainer.width - width, bTrack.width * (root.liveBrightness / 100.0) - width / 2))
+                scale: bMouseArea.pressed ? 1.25 : (bMouseArea.containsMouse ? 1.1 : 1.0)
+
+                Behavior on scale {
+                  NumberAnimation { duration: Style.duration(100); easing.type: Easing.OutCubic }
+                }
               }
 
               MouseArea {
+                id: bMouseArea
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+
+                function updateBrightnessFromMouse(mouseX) {
+                  if (!root.selectedMonitor) return
+                  var pct = Math.max(1, Math.min(100, Math.round((mouseX / width) * 100)))
+                  root.liveBrightness = pct
+                  root.queueBrightness(root.selectedMonitor.name, pct)
+                }
+
+                onPressed: function(mouse) {
+                  updateBrightnessFromMouse(mouse.x)
+                }
+
                 onPositionChanged: function(mouse) {
-                  if (pressed && root.selectedMonitor) {
-                    var pct = Math.max(1, Math.min(100, Math.round((mouse.x / width) * 100)))
-                    root.selectedMonitor.brightness = pct
-                    root.setBrightness(root.selectedMonitor.name, pct)
+                  if (pressed) {
+                    updateBrightnessFromMouse(mouse.x)
                   }
                 }
-                onPressed: function(mouse) {
-                  if (root.selectedMonitor) {
-                    var pct = Math.max(1, Math.min(100, Math.round((mouse.x / width) * 100)))
-                    root.selectedMonitor.brightness = pct
-                    root.setBrightness(root.selectedMonitor.name, pct)
-                  }
+
+                onReleased: function(mouse) {
+                  if (!root.selectedMonitor) return
+                  var pct = Math.max(1, Math.min(100, Math.round((mouse.x / width) * 100)))
+                  root.liveBrightness = pct
+                  var copy = JSON.parse(JSON.stringify(root.monitors))
+                  copy[root.selectedIndex].brightness = pct
+                  root.monitors = copy
+                  root.forceBrightness(root.selectedMonitor.name, pct)
                 }
               }
             }
           }
 
-          // Resolution & Refresh Rate Mode Selector
+          // Resolution Dropdown Row
           Row {
             width: parent.width
             spacing: Style.space(8)
 
-            Column {
-              width: Style.space(260)
-              spacing: Style.space(2)
-
-              Text {
-                textFormat: Text.PlainText
-                text: strings.t("display.mode")
-                color: root.foreground
-                opacity: 0.7
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              Text {
-                textFormat: Text.PlainText
-                text: root.selectedMonitor ? (root.selectedMonitor.width + "x" + root.selectedMonitor.height + " @ " + root.selectedMonitor.refreshRate.toFixed(2) + "Hz") : ""
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
+            Text {
+              textFormat: Text.PlainText
+              text: strings.t("display.resolution") + ":"
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(85)
             }
 
-            Row {
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(4)
-
-              Button {
-                text: "◀ Prev"
-                fontSize: Style.font.caption
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                bordered: true
-                onClicked: root.cycleMode(-1)
+            Dropdown {
+              id: resDropdown
+              width: parent.width - Style.space(93)
+              fontFamily: root.fontFamily
+              showLabel: false
+              options: root.resolutionOptions
+              value: root.currentResolutionValue
+              onChanged: function(v) {
+                root.onResolutionSelected(v)
               }
+            }
+          }
 
-              Button {
-                text: "Next ▶"
-                fontSize: Style.font.caption
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                bordered: true
-                onClicked: root.cycleMode(1)
+          // Refresh Rate Dropdown Row
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            Text {
+              textFormat: Text.PlainText
+              text: strings.t("display.refreshRate") + ":"
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(85)
+            }
+
+            Dropdown {
+              id: rateDropdown
+              width: parent.width - Style.space(93)
+              fontFamily: root.fontFamily
+              showLabel: false
+              options: root.rateOptions
+              value: root.currentRateValue
+              onChanged: function(v) {
+                root.onRateSelected(v)
               }
             }
           }
@@ -636,7 +828,7 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(75)
+              width: Style.space(85)
             }
 
             Row {
@@ -670,7 +862,7 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(75)
+              width: Style.space(85)
             }
 
             Row {
