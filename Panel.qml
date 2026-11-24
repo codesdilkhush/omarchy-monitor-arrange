@@ -11,7 +11,6 @@ Panel {
   id: root
   moduleName: "codesdilkhush.monitor-arrange"
   ipcTarget: "codesdilkhush.monitor-arrange"
-  manageIpc: false
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -25,15 +24,6 @@ Panel {
   Commons.Translations {
     id: strings
     directory: Qt.resolvedUrl("i18n")
-  }
-
-  ShellIpc {
-    target: "codesdilkhush.monitor-arrange"
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function toggle(): void { root.toggle() }
   }
 
   property var monitors: []
@@ -226,19 +216,22 @@ Panel {
     if (monitors.length < 2) return
 
     var otherIdx = (draggedIdx === 0) ? 1 : 0
-    var otherItem = monitorRepeater.itemAt(otherIdx)
-    var draggedItem = monitorRepeater.itemAt(draggedIdx)
-    if (!otherItem || !draggedItem) return
+    var dMon = monitors[draggedIdx]
+    var oMon = monitors[otherIdx]
+    if (!dMon || !oMon) return
 
-    var dW = draggedItem.width
-    var dH = draggedItem.height
-    var oW = otherItem.width
-    var oH = otherItem.height
+    var dW = Math.max(Style.space(80), dMon.width * root.canvasScale)
+    var dH = Math.max(Style.space(50), dMon.height * root.canvasScale)
+    var oW = Math.max(Style.space(80), oMon.width * root.canvasScale)
+    var oH = Math.max(Style.space(50), oMon.height * root.canvasScale)
+
+    var otherTargetX = root.canvasOffsetX + (oMon.x - root.groupBoundsMinX) * root.canvasScale
+    var otherTargetY = root.canvasOffsetY + (oMon.y - root.groupBoundsMinY) * root.canvasScale
 
     var dropCenterX = dropX + dW / 2.0
     var dropCenterY = dropY + dH / 2.0
-    var otherCenterX = otherItem.x + oW / 2.0
-    var otherCenterY = otherItem.y + oH / 2.0
+    var otherCenterX = otherTargetX + oW / 2.0
+    var otherCenterY = otherTargetY + oH / 2.0
 
     var dx = dropCenterX - otherCenterX
     var dy = dropCenterY - otherCenterY
@@ -246,37 +239,39 @@ Panel {
     var normX = dx / ((dW + oW) / 2.0)
     var normY = dy / ((dH + oH) / 2.0)
 
+    console.log("Card dropped: index=" + draggedIdx + " dropX=" + dropX + " normX=" + normX.toFixed(2) + " normY=" + normY.toFixed(2))
+
     var copy = JSON.parse(JSON.stringify(monitors))
-    var dMon = copy[draggedIdx]
-    var oMon = copy[otherIdx]
+    var cdMon = copy[draggedIdx]
+    var coMon = copy[otherIdx]
 
     if (Math.abs(normX) >= Math.abs(normY)) {
       if (normX > 0) {
         // Dragged placed to the RIGHT of other monitor
-        oMon.x = 0
-        oMon.y = 0
-        dMon.x = Math.round(oMon.width / oMon.scale)
-        dMon.y = 0
+        coMon.x = 0
+        coMon.y = 0
+        cdMon.x = Math.round(coMon.width / coMon.scale)
+        cdMon.y = 0
       } else {
         // Dragged placed to the LEFT of other monitor
-        dMon.x = 0
-        dMon.y = 0
-        oMon.x = Math.round(dMon.width / dMon.scale)
-        oMon.y = 0
+        cdMon.x = 0
+        cdMon.y = 0
+        coMon.x = Math.round(cdMon.width / cdMon.scale)
+        coMon.y = 0
       }
     } else {
       if (normY > 0) {
         // Dragged placed BELOW other monitor
-        oMon.x = 0
-        oMon.y = 0
-        dMon.x = 0
-        dMon.y = Math.round(oMon.height / oMon.scale)
+        coMon.x = 0
+        coMon.y = 0
+        cdMon.x = 0
+        cdMon.y = Math.round(coMon.height / coMon.scale)
       } else {
         // Dragged placed ABOVE other monitor
-        dMon.x = 0
-        dMon.y = 0
-        oMon.x = 0
-        oMon.y = Math.round(dMon.height / dMon.scale)
+        cdMon.x = 0
+        cdMon.y = 0
+        coMon.x = 0
+        coMon.y = Math.round(cdMon.height / cdMon.scale)
       }
     }
 
@@ -484,17 +479,23 @@ Panel {
               readonly property real targetX: root.canvasOffsetX + (modelData.x - root.groupBoundsMinX) * root.canvasScale
               readonly property real targetY: root.canvasOffsetY + (modelData.y - root.groupBoundsMinY) * root.canvasScale
 
-              Binding {
-                target: monitorCard
-                property: "x"
-                value: monitorCard.targetX
-                when: !dragArea.drag.active
+              x: dragArea.drag.active ? x : targetX
+              y: dragArea.drag.active ? y : targetY
+
+              onXChanged: {
+                if (dragArea.drag.active) dragArea.lastX = x
               }
-              Binding {
-                target: monitorCard
-                property: "y"
-                value: monitorCard.targetY
-                when: !dragArea.drag.active
+              onYChanged: {
+                if (dragArea.drag.active) dragArea.lastY = y
+              }
+
+              Behavior on x {
+                enabled: !dragArea.drag.active
+                NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutCubic }
+              }
+              Behavior on y {
+                enabled: !dragArea.drag.active
+                NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutCubic }
               }
 
               width: w
@@ -576,22 +577,17 @@ Panel {
                 drag.minimumY: Style.space(4)
                 drag.maximumY: root.canvasHeight - monitorCard.height - Style.space(4)
 
-                property real dropX: 0
-                property real dropY: 0
+                property real lastX: monitorCard.x
+                property real lastY: monitorCard.y
 
                 onPressed: {
                   root.selectedIndex = index
-                  dropX = monitorCard.x
-                  dropY = monitorCard.y
+                  lastX = monitorCard.x
+                  lastY = monitorCard.y
                 }
-                onPositionChanged: {
-                  if (drag.active) {
-                    dropX = monitorCard.x
-                    dropY = monitorCard.y
-                  }
-                }
+
                 onReleased: {
-                  root.onCardDropped(index, dropX, dropY)
+                  root.onCardDropped(index, lastX, lastY)
                 }
               }
             }
