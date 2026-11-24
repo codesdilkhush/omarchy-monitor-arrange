@@ -200,8 +200,14 @@ Panel {
     clearStatusTimer.restart()
   }
 
+  property bool pendingSave: false
+
   function saveLayout() {
-    if (saveProc.running) return
+    if (saveProc.running) {
+      pendingSave = true
+      return
+    }
+    pendingSave = false
     saveProc.command = [
       String(Qt.resolvedUrl("backend.py")).replace(/^file:\/\//, ""),
       "save",
@@ -349,6 +355,7 @@ Panel {
 
   function toggleSelectedMonitorEnabled() {
     if (!selectedMonitor) return
+    if (saveProc.running) return
     var copy = JSON.parse(JSON.stringify(monitors))
     var curr = copy[selectedIndex].disabled || false
     var enabledCount = 0
@@ -397,7 +404,16 @@ Panel {
   }
 
   Process { id: applyProc }
-  Process { id: saveProc }
+  Process {
+    id: saveProc
+    onExited: (exitCode, exitStatus) => {
+      if (root.pendingSave) {
+        root.saveLayout()
+      } else {
+        root.refresh()
+      }
+    }
+  }
 
   BarIconButton {
     id: button
@@ -703,6 +719,7 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
                 trackHeight: Style.space(18)
                 checked: root.selectedMonitor ? !root.selectedMonitor.disabled : true
+                busy: saveProc.running
                 accent: root.accentColor
                 foreground: root.foreground
                 onToggled: root.toggleSelectedMonitorEnabled()
