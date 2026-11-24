@@ -12,6 +12,9 @@
   "display.portrait": "Portrait",
   "display.internal": "Built-in Panel",
   "display.external": "External (DDC/CI)",
+  "display.enable": "Enable Display",
+  "display.disable": "Disable Display",
+  "display.disabled": "Disabled",
   "display.applied": "Applied to Hyprland!",
   "display.saved": "Saved to monitors.lua!",
   "display.tooltip": "Display Studio: Drag to arrange, scale, & brightness"

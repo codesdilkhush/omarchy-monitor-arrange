@@ -347,6 +347,21 @@ Panel {
     root.saveLayout()
   }
 
+  function toggleSelectedMonitorEnabled() {
+    if (!selectedMonitor || selectedMonitor.isInternal) return
+    var copy = JSON.parse(JSON.stringify(monitors))
+    var curr = copy[selectedIndex].disabled || false
+    var enabledCount = 0
+    for (var i = 0; i < copy.length; i++) {
+      if (!copy[i].disabled) enabledCount++
+    }
+    if (!curr && enabledCount <= 1) return
+
+    copy[selectedIndex].disabled = !curr
+    monitors = copy
+    root.saveLayout()
+  }
+
   onOpenedChanged: {
     if (opened) {
       statusMessage = ""
@@ -522,6 +537,7 @@ Panel {
 
               width: w
               height: h
+              opacity: (modelData.disabled || false) ? 0.45 : 1.0
               z: dragArea.drag.active ? 100 : (isSelected ? 10 : 1)
               scale: dragArea.drag.active ? 1.05 : 1.0
 
@@ -584,6 +600,17 @@ Panel {
                     font.pixelSize: Style.font.caption
                     anchors.horizontalCenter: parent.horizontalCenter
                   }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    visible: modelData.disabled || false
+                    text: strings.t("display.disabled")
+                    color: root.urgentColor
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                    anchors.horizontalCenter: parent.horizontalCenter
+                  }
                 }
               }
 
@@ -627,12 +654,12 @@ Panel {
           // Monitor Info Line
           Item {
             width: parent.width
-            implicitHeight: Math.max(monitorNameText.implicitHeight, tagBadge.height)
+            implicitHeight: Math.max(monitorNameText.implicitHeight, badgeRow.implicitHeight)
 
             Text {
               id: monitorNameText
               anchors.left: parent.left
-              anchors.right: tagBadge.left
+              anchors.right: badgeRow.left
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
@@ -644,24 +671,41 @@ Panel {
               elide: Text.ElideRight
             }
 
-            Rectangle {
-              id: tagBadge
+            Row {
+              id: badgeRow
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              height: Style.space(18)
-              width: tagText.implicitWidth + Style.space(10)
-              radius: 4
-              color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.15)
+              spacing: Style.space(6)
 
-              Text {
-                id: tagText
-                anchors.centerIn: parent
-                textFormat: Text.PlainText
-                text: root.selectedMonitor && root.selectedMonitor.isInternal ? strings.t("display.internal") : strings.t("display.external")
-                color: root.accentColor
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
+              Rectangle {
+                id: tagBadge
+                anchors.verticalCenter: parent.verticalCenter
+                height: Style.space(18)
+                width: tagText.implicitWidth + Style.space(10)
+                radius: 4
+                color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.15)
+
+                Text {
+                  id: tagText
+                  anchors.centerIn: parent
+                  textFormat: Text.PlainText
+                  text: root.selectedMonitor && root.selectedMonitor.isInternal ? strings.t("display.internal") : strings.t("display.external")
+                  color: root.accentColor
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+              }
+
+              Button {
+                id: toggleEnableBtn
+                visible: root.selectedMonitor && !root.selectedMonitor.isInternal
+                text: root.selectedMonitor && root.selectedMonitor.disabled ? strings.t("display.enable") : strings.t("display.disable")
+                fontSize: Style.font.caption
+                foreground: root.selectedMonitor && root.selectedMonitor.disabled ? root.accentColor : root.urgentColor
+                fontFamily: root.fontFamily
+                bordered: true
+                onClicked: root.toggleSelectedMonitorEnabled()
               }
             }
           }
