@@ -1,0 +1,17 @@
+{
+  "display.title": "Display Studio",
+  "display.subtitle": "Drag to arrange displays · Click to configure",
+  "display.apply": "Apply Changes",
+  "display.save": "Save to Config",
+  "display.brightness": "Brightness",
+  "display.scale": "Scale",
+  "display.mode": "Resolution & Rate",
+  "display.orientation": "Orientation",
+  "display.landscape": "Landscape",
+  "display.portrait": "Portrait",
+  "display.internal": "Built-in Panel",
+  "display.external": "External (DDC/CI)",
+  "display.applied": "Applied to Hyprland!",
+  "display.saved": "Saved to monitors.lua!",
+  "display.tooltip": "Display Studio: Drag to arrange, scale, & brightness"
+}
