@@ -246,31 +246,51 @@ Panel {
     var coMon = copy[otherIdx]
 
     if (Math.abs(normX) >= Math.abs(normY)) {
+      var dH = Math.round(dMon.height / dMon.scale)
+      var oH = Math.round(oMon.height / oMon.scale)
+      var dY = 0
+      var oY = 0
+      if (dH < oH) {
+        dY = Math.round((oH - dH) / 2.0)
+      } else if (oH < dH) {
+        oY = Math.round((dH - oH) / 2.0)
+      }
+
       if (normX > 0) {
-        // Dragged placed to the RIGHT of other monitor
+        // Dragged placed to the RIGHT of other monitor (centered vertically)
         coMon.x = 0
-        coMon.y = 0
+        coMon.y = oY
         cdMon.x = Math.round(coMon.width / coMon.scale)
-        cdMon.y = 0
+        cdMon.y = dY
       } else {
-        // Dragged placed to the LEFT of other monitor
+        // Dragged placed to the LEFT of other monitor (centered vertically)
         cdMon.x = 0
-        cdMon.y = 0
+        cdMon.y = dY
         coMon.x = Math.round(cdMon.width / cdMon.scale)
-        coMon.y = 0
+        coMon.y = oY
       }
     } else {
+      var dW = Math.round(dMon.width / dMon.scale)
+      var oW = Math.round(oMon.width / oMon.scale)
+      var dX = 0
+      var oX = 0
+      if (dW < oW) {
+        dX = Math.round((oW - dW) / 2.0)
+      } else if (oW < dW) {
+        oX = Math.round((dW - oW) / 2.0)
+      }
+
       if (normY > 0) {
-        // Dragged placed BELOW other monitor
-        coMon.x = 0
+        // Dragged placed BELOW other monitor (centered horizontally)
+        coMon.x = oX
         coMon.y = 0
-        cdMon.x = 0
+        cdMon.x = dX
         cdMon.y = Math.round(coMon.height / coMon.scale)
       } else {
-        // Dragged placed ABOVE other monitor
-        cdMon.x = 0
+        // Dragged placed ABOVE other monitor (centered horizontally)
+        cdMon.x = dX
         cdMon.y = 0
-        coMon.x = 0
+        coMon.x = oX
         coMon.y = Math.round(cdMon.height / cdMon.scale)
       }
     }
@@ -380,6 +400,7 @@ Panel {
     anchorItem: button
     owner: root
     bar: root.bar
+    centerOnBar: true
     open: root.opened
     focusTarget: panel.loadedContent
     contentWidth: panel.fittedContentWidth(Style.space(475))
