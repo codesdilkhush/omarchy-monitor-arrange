@@ -6,7 +6,7 @@ Visual monitor arrangement, display resolution, refresh rate, scale, orientation
 
 ## Features
 
-- **Interactive Canvas:** Visual layout of all connected screens with quick swap and stacking
+- **Interactive Drag & Snap Canvas:** Direct mouse drag-and-drop monitor positioning with edge snapping and smooth easing
 - **Hardware Brightness:** Dedicated brightness control for internal backlights and external monitors via DDC/CI
 - **Display Modes:** Supported resolution and refresh rate selection per monitor
 - **Scaling & Orientation:** Scale presets (100% - 200%) and orientation (Landscape, Portrait, Inverted)

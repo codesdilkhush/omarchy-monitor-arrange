@@ -40,7 +40,34 @@ Panel {
   property int selectedIndex: 0
   readonly property var selectedMonitor: monitors.length > selectedIndex && selectedIndex >= 0 ? monitors[selectedIndex] : null
   property string statusMessage: ""
-  property real canvasScale: 0.055
+  property real canvasScale: 0.052
+
+  readonly property real groupBoundsMinX: {
+    if (monitors.length === 0) return 0
+    var m = monitors[0].x
+    for (var i = 1; i < monitors.length; i++) m = Math.min(m, monitors[i].x)
+    return m
+  }
+  readonly property real groupBoundsMaxX: {
+    if (monitors.length === 0) return 1920
+    var m = monitors[0].x + monitors[0].width
+    for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].x + monitors[i].width)
+    return m
+  }
+  readonly property real groupBoundsMinY: {
+    if (monitors.length === 0) return 0
+    var m = monitors[0].y
+    for (var i = 1; i < monitors.length; i++) m = Math.min(m, monitors[i].y)
+    return m
+  }
+  readonly property real groupBoundsMaxY: {
+    if (monitors.length === 0) return 1080
+    var m = monitors[0].y + monitors[0].height
+    for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].y + monitors[i].height)
+    return m
+  }
+  readonly property real canvasOffsetX: Math.max(Style.space(20), (canvas.width - (groupBoundsMaxX - groupBoundsMinX) * canvasScale) / 2)
+  readonly property real canvasOffsetY: Math.max(Style.space(18), (canvas.height - (groupBoundsMaxY - groupBoundsMinY) * canvasScale) / 2)
 
   function parseStatus(raw) {
     try {
@@ -93,32 +120,59 @@ Panel {
     clearStatusTimer.restart()
   }
 
-  function swapHorizontal() {
+  function onCardDropped(draggedIdx) {
     if (monitors.length < 2) return
-    var copy = JSON.parse(JSON.stringify(monitors))
-    if (copy[0].x === 0 && copy[1].x > 0) {
-      // Move screen 0 to the right of screen 1
-      copy[1].x = 0
-      copy[0].x = Math.round(copy[1].width / copy[1].scale)
-    } else {
-      // Move screen 1 to the right of screen 0
-      copy[0].x = 0
-      copy[1].x = Math.round(copy[0].width / copy[0].scale)
-    }
-    monitors = copy
-  }
 
-  function swapVertical() {
-    if (monitors.length < 2) return
+    var draggedItem = monitorRepeater.itemAt(draggedIdx)
+    var otherIdx = (draggedIdx === 0) ? 1 : 0
+    var otherItem = monitorRepeater.itemAt(otherIdx)
+    if (!draggedItem || !otherItem) return
+
+    var draggedCenterX = draggedItem.x + draggedItem.width / 2
+    var draggedCenterY = draggedItem.y + draggedItem.height / 2
+    var otherCenterX = otherItem.x + otherItem.width / 2
+    var otherCenterY = otherItem.y + otherItem.height / 2
+
+    var dx = draggedCenterX - otherCenterX
+    var dy = draggedCenterY - otherCenterY
+
     var copy = JSON.parse(JSON.stringify(monitors))
-    if (copy[0].y === 0 && copy[1].y > 0) {
-      copy[1].y = 0
-      copy[0].y = Math.round(copy[1].height / copy[1].scale)
+    var dMon = copy[draggedIdx]
+    var oMon = copy[otherIdx]
+
+    // Determine primary drag direction (horizontal vs vertical)
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (dx > 0) {
+        // Dragged monitor placed to the RIGHT of other monitor
+        oMon.x = 0
+        oMon.y = 0
+        dMon.x = Math.round(oMon.width / oMon.scale)
+        dMon.y = 0
+      } else {
+        // Dragged monitor placed to the LEFT of other monitor
+        dMon.x = 0
+        dMon.y = 0
+        oMon.x = Math.round(dMon.width / dMon.scale)
+        oMon.y = 0
+      }
     } else {
-      copy[0].y = 0
-      copy[1].y = Math.round(copy[0].height / copy[0].scale)
+      if (dy > 0) {
+        // Dragged monitor placed BELOW other monitor
+        oMon.x = 0
+        oMon.y = 0
+        dMon.x = 0
+        dMon.y = Math.round(oMon.height / oMon.scale)
+      } else {
+        // Dragged monitor placed ABOVE other monitor
+        dMon.x = 0
+        dMon.y = 0
+        oMon.x = 0
+        oMon.y = Math.round(dMon.height / dMon.scale)
+      }
     }
+
     monitors = copy
+    statusMessage = "Position snapped! Click Apply or Save"
   }
 
   function setScale(scaleVal) {
@@ -138,7 +192,6 @@ Panel {
   function cycleMode(delta) {
     if (!selectedMonitor || !selectedMonitor.availableModes || selectedMonitor.availableModes.length === 0) return
     var modes = selectedMonitor.availableModes
-    var currentStr = selectedMonitor.width + "x" + selectedMonitor.height + "@" + selectedMonitor.refreshRate.toFixed(2)
     var idx = 0
     for (var i = 0; i < modes.length; i++) {
       if (modes[i].indexOf(selectedMonitor.width + "x" + selectedMonitor.height) === 0) {
@@ -203,7 +256,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: panel.loadedContent
-    contentWidth: panel.fittedContentWidth(Style.space(450))
+    contentWidth: panel.fittedContentWidth(Style.space(465))
     contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
 
     content: PanelKeyCatcher {
@@ -260,22 +313,32 @@ Panel {
 
         PanelSeparator { foreground: root.foreground }
 
-        // Interactive Arrangement Canvas
+        // Interactive Drag-and-Drop Arrangement Canvas
         Rectangle {
           id: canvas
           width: parent.width
-          height: Style.space(145)
+          height: Style.space(155)
           radius: Style.cornerRadius > 0 ? Style.cornerRadius : 8
-          color: Qt.rgba(0, 0, 0, 0.22)
+          color: Qt.rgba(0, 0, 0, 0.25)
           border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
           border.width: 1
           clip: true
 
-          // Center positioning offsets
-          readonly property real originX: Style.space(35)
-          readonly property real originY: Style.space(25)
+          // Helper hint at the bottom
+          Text {
+            textFormat: Text.PlainText
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottomMargin: Style.space(6)
+            text: "✦ Drag screens to position · Release to snap"
+            color: root.foreground
+            opacity: 0.4
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
 
           Repeater {
+            id: monitorRepeater
             model: root.monitors
 
             Item {
@@ -287,15 +350,32 @@ Panel {
               readonly property real w: Math.max(Style.space(80), modelData.width * root.canvasScale)
               readonly property real h: Math.max(Style.space(50), modelData.height * root.canvasScale)
 
-              x: canvas.originX + (modelData.x * root.canvasScale)
-              y: canvas.originY + (modelData.y * root.canvasScale)
+              readonly property real targetX: root.canvasOffsetX + (modelData.x - root.groupBoundsMinX) * root.canvasScale
+              readonly property real targetY: root.canvasOffsetY + (modelData.y - root.groupBoundsMinY) * root.canvasScale
+
+              x: dragArea.drag.active ? x : targetX
+              y: dragArea.drag.active ? y : targetY
               width: w
               height: h
+              z: dragArea.drag.active ? 100 : (isSelected ? 10 : 1)
+              scale: dragArea.drag.active ? 1.05 : 1.0
+
+              Behavior on x {
+                enabled: !dragArea.drag.active
+                NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutCubic }
+              }
+              Behavior on y {
+                enabled: !dragArea.drag.active
+                NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutCubic }
+              }
+              Behavior on scale {
+                NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+              }
 
               Rectangle {
                 anchors.fill: parent
                 radius: 6
-                color: monitorCard.isSelected ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.2) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                color: monitorCard.isSelected ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) : (dragArea.drag.active ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08))
                 border.color: monitorCard.isSelected ? root.accentColor : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.3)
                 border.width: monitorCard.isSelected ? 2 : 1
 
@@ -351,37 +431,24 @@ Panel {
               }
 
               MouseArea {
+                id: dragArea
                 anchors.fill: parent
                 hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.selectedIndex = index
+                cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                drag.target: monitorCard
+                drag.axis: Drag.XAndYAxis
+                drag.minimumX: Style.space(5)
+                drag.maximumX: canvas.width - monitorCard.width - Style.space(5)
+                drag.minimumY: Style.space(5)
+                drag.maximumY: canvas.height - monitorCard.height - Style.space(5)
+
+                onPressed: {
+                  root.selectedIndex = index
+                }
+                onReleased: {
+                  root.onCardDropped(index)
+                }
               }
-            }
-          }
-
-          // Canvas Arrangement Helpers (Swap Left/Right, Swap Top/Bottom)
-          Row {
-            anchors.bottom: parent.bottom
-            anchors.right: parent.right
-            anchors.margins: Style.space(8)
-            spacing: Style.space(6)
-
-            Button {
-              text: "⇄ Swap Sides"
-              fontSize: Style.font.caption
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              bordered: true
-              onClicked: root.swapHorizontal()
-            }
-
-            Button {
-              text: "⇅ Stack"
-              fontSize: Style.font.caption
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              bordered: true
-              onClicked: root.swapVertical()
             }
           }
         }
@@ -395,11 +462,16 @@ Panel {
           visible: root.selectedMonitor !== null
 
           // Monitor Info Line
-          Row {
+          Item {
             width: parent.width
-            spacing: Style.space(8)
+            implicitHeight: Math.max(monitorNameText.implicitHeight, tagBadge.height)
 
             Text {
+              id: monitorNameText
+              anchors.left: parent.left
+              anchors.right: tagBadge.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
               text: (root.selectedMonitor ? root.selectedMonitor.name : "") + " (" + (root.selectedMonitor ? root.selectedMonitor.description : "") + ")"
               color: root.foreground
@@ -407,16 +479,12 @@ Panel {
               font.pixelSize: Style.font.body
               font.bold: true
               elide: Text.ElideRight
-              width: Style.space(310)
-            }
-
-            Item {
-              width: Math.max(0, parent.width - Style.space(310) - tagBadge.implicitWidth)
-              height: 1
             }
 
             Rectangle {
               id: tagBadge
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
               height: Style.space(18)
               width: tagText.implicitWidth + Style.space(10)
               radius: 4
@@ -568,7 +636,7 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(60)
+              width: Style.space(75)
             }
 
             Row {
@@ -602,7 +670,7 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(60)
+              width: Style.space(75)
             }
 
             Row {
