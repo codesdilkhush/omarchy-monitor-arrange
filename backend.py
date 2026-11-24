@@ -84,6 +84,73 @@ def set_brightness(name, percent):
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
+def sanitize_monitor_positions(monitors_data):
+    """
+    Guarantees no active monitors overlap in logical coordinates.
+    If overlap is detected, adjusts coordinates so monitors sit flush.
+    """
+    active = [m for m in monitors_data if not m.get("disabled", False)]
+    if len(active) <= 1:
+        return monitors_data
+
+    def get_box(m):
+        scale = float(m.get("scale", 1.0))
+        if scale <= 0:
+            scale = 1.0
+        w = int(m.get("width", 1920))
+        h = int(m.get("height", 1080))
+        transform = int(m.get("transform", 0))
+        if transform in (1, 3):
+            eff_w = int(h / scale + 0.5)
+            eff_h = int(w / scale + 0.5)
+        else:
+            eff_w = int(w / scale + 0.5)
+            eff_h = int(h / scale + 0.5)
+        x = int(m.get("x", 0))
+        y = int(m.get("y", 0))
+        return x, y, eff_w, eff_h
+
+    # Check for any overlapping pairs
+    has_overlap = False
+    for i in range(len(active)):
+        x1, y1, w1, h1 = get_box(active[i])
+        for j in range(i + 1, len(active)):
+            x2, y2, w2, h2 = get_box(active[j])
+            if not (x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1):
+                has_overlap = True
+                break
+        if has_overlap:
+            break
+
+    if has_overlap:
+        m0 = active[0]
+        m1 = active[1]
+        x0, y0, w0, h0 = get_box(m0)
+        x1, y1, w1, h1 = get_box(m1)
+        dx = (x1 + w1 / 2.0) - (x0 + w0 / 2.0)
+        dy = (y1 + h1 / 2.0) - (y0 + h0 / 2.0)
+
+        if abs(dx) >= abs(dy):
+            active.sort(key=lambda m: m.get("x", 0))
+            max_h = max(get_box(m)[3] for m in active)
+            curr_x = 0
+            for m in active:
+                _, _, eff_w, eff_h = get_box(m)
+                m["x"] = curr_x
+                m["y"] = int((max_h - eff_h) / 2.0)
+                curr_x += eff_w
+        else:
+            active.sort(key=lambda m: m.get("y", 0))
+            max_w = max(get_box(m)[2] for m in active)
+            curr_y = 0
+            for m in active:
+                _, _, eff_w, eff_h = get_box(m)
+                m["x"] = int((max_w - eff_w) / 2.0)
+                m["y"] = curr_y
+                curr_y += eff_h
+
+    return monitors_data
+
 def make_rule(m):
     name = m["name"]
     if m.get("disabled", False):
@@ -207,6 +274,7 @@ def update_monitors_lua_content(existing_content, monitors_data):
 def save_layout(payload):
     try:
         data = json.loads(payload)
+        data = sanitize_monitor_positions(data)
         monitors_lua = Path.home() / ".config/hypr/monitors.lua"
         monitors_lua.parent.mkdir(parents=True, exist_ok=True)
 
@@ -235,7 +303,7 @@ def save_layout(payload):
 
         # Apply atomically via Hyprland reload
         subprocess.run(["hyprctl", "reload"], check=True, stdout=subprocess.DEVNULL)
-        subprocess.run(["hyprctl", "dismissnotify"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["hyprctl", "dismissnotify", "-1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("saved")
     except Exception as e:
         print(f"error: {e}", file=sys.stderr)

@@ -38,6 +38,24 @@ Panel {
   property string statusMessage: ""
   property real canvasScale: 0.052
 
+  function getEffectiveWidth(m) {
+    if (!m) return 1920
+    var s = m.scale || 1.0
+    if (m.transform === 1 || m.transform === 3) {
+      return Math.round((m.height || 1080) / s)
+    }
+    return Math.round((m.width || 1920) / s)
+  }
+
+  function getEffectiveHeight(m) {
+    if (!m) return 1080
+    var s = m.scale || 1.0
+    if (m.transform === 1 || m.transform === 3) {
+      return Math.round((m.width || 1920) / s)
+    }
+    return Math.round((m.height || 1080) / s)
+  }
+
   readonly property real groupBoundsMinX: {
     if (monitors.length === 0) return 0
     var m = monitors[0].x
@@ -46,8 +64,8 @@ Panel {
   }
   readonly property real groupBoundsMaxX: {
     if (monitors.length === 0) return 1920
-    var m = monitors[0].x + monitors[0].width
-    for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].x + monitors[i].width)
+    var m = monitors[0].x + root.getEffectiveWidth(monitors[0])
+    for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].x + root.getEffectiveWidth(monitors[i]))
     return m
   }
   readonly property real groupBoundsMinY: {
@@ -58,8 +76,8 @@ Panel {
   }
   readonly property real groupBoundsMaxY: {
     if (monitors.length === 0) return 1080
-    var m = monitors[0].y + monitors[0].height
-    for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].y + monitors[i].height)
+    var m = monitors[0].y + root.getEffectiveHeight(monitors[0])
+    for (var i = 1; i < monitors.length; i++) m = Math.max(m, monitors[i].y + root.getEffectiveHeight(monitors[i]))
     return m
   }
   property real canvasWidth: Style.space(450)
@@ -218,6 +236,73 @@ Panel {
     clearStatusTimer.restart()
   }
 
+  function sanitizeAndReconcileLayout(list) {
+    if (!list || list.length === 0) return list
+    var activeIndices = []
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i].disabled) activeIndices.push(i)
+    }
+    if (activeIndices.length <= 1) return list
+
+    if (activeIndices.length === 2) {
+      var i0 = activeIndices[0]
+      var i1 = activeIndices[1]
+      var m0 = list[i0]
+      var m1 = list[i1]
+
+      var w0 = root.getEffectiveWidth(m0)
+      var h0 = root.getEffectiveHeight(m0)
+      var w1 = root.getEffectiveWidth(m1)
+      var h1 = root.getEffectiveHeight(m1)
+
+      var dx = (m1.x + w1 / 2.0) - (m0.x + w0 / 2.0)
+      var dy = (m1.y + h1 / 2.0) - (m0.y + h0 / 2.0)
+
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        var dY0 = 0
+        var dY1 = 0
+        if (h0 < h1) {
+          dY0 = Math.round((h1 - h0) / 2.0)
+        } else if (h1 < h0) {
+          dY1 = Math.round((h0 - h1) / 2.0)
+        }
+
+        if (dx >= 0) {
+          m0.x = 0
+          m0.y = dY0
+          m1.x = w0
+          m1.y = dY1
+        } else {
+          m1.x = 0
+          m1.y = dY1
+          m0.x = w1
+          m0.y = dY0
+        }
+      } else {
+        var dX0 = 0
+        var dX1 = 0
+        if (w0 < w1) {
+          dX0 = Math.round((w1 - w0) / 2.0)
+        } else if (w1 < w0) {
+          dX1 = Math.round((w0 - w1) / 2.0)
+        }
+
+        if (dy >= 0) {
+          m0.x = dX0
+          m0.y = 0
+          m1.x = dX1
+          m1.y = h0
+        } else {
+          m1.x = dX1
+          m1.y = 0
+          m0.x = dX0
+          m0.y = h1
+        }
+      }
+    }
+    return list
+  }
+
   function onCardDropped(draggedIdx, dropX, dropY) {
     if (monitors.length < 2) return
 
@@ -226,10 +311,10 @@ Panel {
     var oMon = monitors[otherIdx]
     if (!dMon || !oMon) return
 
-    var dW = Math.max(Style.space(80), dMon.width * root.canvasScale)
-    var dH = Math.max(Style.space(50), dMon.height * root.canvasScale)
-    var oW = Math.max(Style.space(80), oMon.width * root.canvasScale)
-    var oH = Math.max(Style.space(50), oMon.height * root.canvasScale)
+    var dW = Math.max(Style.space(80), root.getEffectiveWidth(dMon) * root.canvasScale)
+    var dH = Math.max(Style.space(50), root.getEffectiveHeight(dMon) * root.canvasScale)
+    var oW = Math.max(Style.space(80), root.getEffectiveWidth(oMon) * root.canvasScale)
+    var oH = Math.max(Style.space(50), root.getEffectiveHeight(oMon) * root.canvasScale)
 
     var otherTargetX = root.canvasOffsetX + (oMon.x - root.groupBoundsMinX) * root.canvasScale
     var otherTargetY = root.canvasOffsetY + (oMon.y - root.groupBoundsMinY) * root.canvasScale
@@ -251,39 +336,40 @@ Panel {
     var cdMon = copy[draggedIdx]
     var coMon = copy[otherIdx]
 
+    var effDW = root.getEffectiveWidth(cdMon)
+    var effDH = root.getEffectiveHeight(cdMon)
+    var effOW = root.getEffectiveWidth(coMon)
+    var effOH = root.getEffectiveHeight(coMon)
+
     if (Math.abs(normX) >= Math.abs(normY)) {
-      var dH = Math.round(dMon.height / dMon.scale)
-      var oH = Math.round(oMon.height / oMon.scale)
       var dY = 0
       var oY = 0
-      if (dH < oH) {
-        dY = Math.round((oH - dH) / 2.0)
-      } else if (oH < dH) {
-        oY = Math.round((dH - oH) / 2.0)
+      if (effDH < effOH) {
+        dY = Math.round((effOH - effDH) / 2.0)
+      } else if (effOH < effDH) {
+        oY = Math.round((effDH - effOH) / 2.0)
       }
 
       if (normX > 0) {
         // Dragged placed to the RIGHT of other monitor (centered vertically)
         coMon.x = 0
         coMon.y = oY
-        cdMon.x = Math.round(coMon.width / coMon.scale)
+        cdMon.x = effOW
         cdMon.y = dY
       } else {
         // Dragged placed to the LEFT of other monitor (centered vertically)
         cdMon.x = 0
         cdMon.y = dY
-        coMon.x = Math.round(cdMon.width / cdMon.scale)
+        coMon.x = effDW
         coMon.y = oY
       }
     } else {
-      var dW = Math.round(dMon.width / dMon.scale)
-      var oW = Math.round(oMon.width / oMon.scale)
       var dX = 0
       var oX = 0
-      if (dW < oW) {
-        dX = Math.round((oW - dW) / 2.0)
-      } else if (oW < dW) {
-        oX = Math.round((dW - oW) / 2.0)
+      if (effDW < effOW) {
+        dX = Math.round((effOW - effDW) / 2.0)
+      } else if (effOW < effDW) {
+        oX = Math.round((effDW - effOW) / 2.0)
       }
 
       if (normY > 0) {
@@ -291,13 +377,13 @@ Panel {
         coMon.x = oX
         coMon.y = 0
         cdMon.x = dX
-        cdMon.y = Math.round(coMon.height / coMon.scale)
+        cdMon.y = effOH
       } else {
         // Dragged placed ABOVE other monitor (centered horizontally)
         cdMon.x = dX
         cdMon.y = 0
         coMon.x = oX
-        coMon.y = Math.round(cdMon.height / cdMon.scale)
+        coMon.y = effDH
       }
     }
 
@@ -322,6 +408,7 @@ Panel {
       copy[selectedIndex].refreshRate = parseFloat(availRates[0].value)
     }
 
+    copy = root.sanitizeAndReconcileLayout(copy)
     monitors = copy
     root.saveLayout()
   }
@@ -341,6 +428,7 @@ Panel {
     if (!selectedMonitor) return
     var copy = JSON.parse(JSON.stringify(monitors))
     copy[selectedIndex].scale = scaleVal
+    copy = root.sanitizeAndReconcileLayout(copy)
     monitors = copy
     root.saveLayout()
   }
@@ -349,6 +437,7 @@ Panel {
     if (!selectedMonitor) return
     var copy = JSON.parse(JSON.stringify(monitors))
     copy[selectedIndex].transform = transVal
+    copy = root.sanitizeAndReconcileLayout(copy)
     monitors = copy
     root.saveLayout()
   }
@@ -365,6 +454,7 @@ Panel {
     if (!curr && enabledCount <= 1) return
 
     copy[selectedIndex].disabled = !curr
+    copy = root.sanitizeAndReconcileLayout(copy)
     monitors = copy
     root.saveLayout()
   }
@@ -526,8 +616,8 @@ Panel {
               required property int index
 
               readonly property bool isSelected: root.selectedIndex === index
-              readonly property real w: Math.max(Style.space(80), modelData.width * root.canvasScale)
-              readonly property real h: Math.max(Style.space(50), modelData.height * root.canvasScale)
+              readonly property real w: Math.max(Style.space(80), root.getEffectiveWidth(modelData) * root.canvasScale)
+              readonly property real h: Math.max(Style.space(50), root.getEffectiveHeight(modelData) * root.canvasScale)
 
               readonly property real targetX: root.canvasOffsetX + (modelData.x - root.groupBoundsMinX) * root.canvasScale
               readonly property real targetY: root.canvasOffsetY + (modelData.y - root.groupBoundsMinY) * root.canvasScale
