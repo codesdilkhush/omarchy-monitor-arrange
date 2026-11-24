@@ -348,7 +348,7 @@ Panel {
   }
 
   function toggleSelectedMonitorEnabled() {
-    if (!selectedMonitor || selectedMonitor.isInternal) return
+    if (!selectedMonitor) return
     var copy = JSON.parse(JSON.stringify(monitors))
     var curr = copy[selectedIndex].disabled || false
     var enabledCount = 0
@@ -675,7 +675,7 @@ Panel {
               id: badgeRow
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(6)
+              spacing: Style.space(8)
 
               Rectangle {
                 id: tagBadge
@@ -697,15 +697,15 @@ Panel {
                 }
               }
 
-              Button {
-                id: toggleEnableBtn
-                visible: root.selectedMonitor && !root.selectedMonitor.isInternal
-                text: root.selectedMonitor && root.selectedMonitor.disabled ? strings.t("display.enable") : strings.t("display.disable")
-                fontSize: Style.font.caption
-                foreground: root.selectedMonitor && root.selectedMonitor.disabled ? root.accentColor : root.urgentColor
-                fontFamily: root.fontFamily
-                bordered: true
-                onClicked: root.toggleSelectedMonitorEnabled()
+              ToggleSwitch {
+                id: monitorEnableSwitch
+                visible: root.selectedMonitor && root.monitors.length > 1
+                anchors.verticalCenter: parent.verticalCenter
+                trackHeight: Style.space(18)
+                checked: root.selectedMonitor ? !root.selectedMonitor.disabled : true
+                accent: root.accentColor
+                foreground: root.foreground
+                onToggled: root.toggleSelectedMonitorEnabled()
               }
             }
           }
