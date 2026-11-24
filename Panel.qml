@@ -450,11 +450,12 @@ Panel {
 
             Text {
               textFormat: Text.PlainText
-              text: strings.t("display.subtitle")
-              color: root.foreground
-              opacity: 0.65
+              text: root.statusMessage !== "" ? root.statusMessage : strings.t("display.subtitle")
+              color: root.statusMessage !== "" ? root.accentColor : root.foreground
+              opacity: root.statusMessage !== "" ? 1.0 : 0.65
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
+              font.bold: root.statusMessage !== ""
             }
           }
         }
@@ -915,42 +916,6 @@ Panel {
                 onClicked: root.setTransform(2)
               }
             }
-          }
-        }
-
-        PanelSeparator { foreground: root.foreground }
-
-        // Action Buttons Row & Status Label
-        Row {
-          width: parent.width
-          spacing: Style.space(8)
-
-          Button {
-            text: strings.t("display.apply")
-            iconText: "\uf00c"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            bordered: true
-            onClicked: root.applyLayout()
-          }
-
-          Button {
-            text: strings.t("display.save")
-            iconText: "\uf0c7"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            bordered: true
-            onClicked: root.saveLayout()
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            text: root.statusMessage
-            color: root.accentColor
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.bold: true
-            anchors.verticalCenter: parent.verticalCenter
           }
         }
       }
